@@ -1,16 +1,15 @@
 import pygame
 import random
 import math
-import os  # para lidar com caminhos de arquivos
+import os
 
 # =============================================================================
 # CONFIGURAÇÕES GERAIS
 # =============================================================================
 LARGURA_TELA, ALTURA_TELA = 800, 600
 FPS = 60
-NOME_JANELA = "Batalha Pokémon - Versão gay + hitbox + wobble"
+NOME_JANELA = "Batalha Pokémon - Respiração + Flash Correto"
 
-# Cores
 COR_FUNDO = (20, 20, 30)
 COR_ARENA_BORDA = (200, 200, 200)
 
@@ -22,7 +21,6 @@ VERMELHO = (255, 50, 50)
 AZUL = (50, 100, 255)
 VERDE_CLARO = (100, 255, 100)
 
-# Cores temáticas de tipos
 C_ELETRICO = (255, 255, 0)
 C_PLANTA = (0, 255, 0)
 C_FANTASMA = (140, 80, 200)
@@ -32,7 +30,6 @@ C_AGUA = (50, 150, 255)
 C_ACO = (180, 180, 200)
 C_VENENO = (160, 60, 160)
 
-# Arena
 LARGURA_ARENA = 600
 ALTURA_ARENA = 450
 ARENA_X = (LARGURA_TELA - LARGURA_ARENA) // 2
@@ -81,7 +78,7 @@ class Particula:
             surface.blit(s, (self.x - self.tamanho, self.y - self.tamanho))
 
 # =============================================================================
-# PROJÉTEIS (Shadow Ball, Shuriken, Fogo no chão)
+# PROJÉTEIS
 # =============================================================================
 class Projetil(pygame.sprite.Sprite):
     def __init__(self, x, y, dono, tipo, alvo=None, direcao=None):
@@ -97,17 +94,17 @@ class Projetil(pygame.sprite.Sprite):
         self.alpha = 255
 
         if tipo == "Shadow Ball":
-            self.image_base = pygame.Surface((16, 16))
+            self.image_base = pygame.Surface((16, 16), pygame.SRCALPHA)
             self.image_base.fill(self.info["cor"])
             self.pos = pygame.math.Vector2(x, y)
             self.vel = pygame.math.Vector2(random.choice([-4, 4]), random.choice([-4, 4]))
         elif tipo == "Shuriken":
-            self.image_base = pygame.Surface((10, 10))
+            self.image_base = pygame.Surface((10, 10), pygame.SRCALPHA)
             self.image_base.fill(self.info["cor"])
             self.pos = pygame.math.Vector2(x, y)
             self.vel = direcao * 12
         elif tipo == "Fogo":
-            self.image_base = pygame.Surface((20, 20))
+            self.image_base = pygame.Surface((20, 20), pygame.SRCALPHA)
             self.image_base.fill(self.info["cor"])
             self.pos = pygame.math.Vector2(x, y)
             self.vel = pygame.math.Vector2(0, 0)
@@ -155,18 +152,16 @@ class Projetil(pygame.sprite.Sprite):
                 particles.append(Particula(self.rect.centerx, self.rect.centery, (255, 200, 0), 1, 4, 20))
 
         self.rect.center = self.pos
-
         if self.tipo != "Fogo" and not ARENA_RECT.colliderect(self.rect):
             self.kill()
 
 # =============================================================================
-# POKEMON
+# POKEMON (respiração + flash só no sprite)
 # =============================================================================
 class Pokemon(pygame.sprite.Sprite):
     def __init__(self, nome_dummy, x, y, cor, id_ataque, imagem_path=None):
         super().__init__()
 
-        # Nome baseado no arquivo em assets/
         if imagem_path:
             nome_arquivo = os.path.basename(imagem_path)
             nome_sem_ext = os.path.splitext(nome_arquivo)[0]
@@ -183,7 +178,6 @@ class Pokemon(pygame.sprite.Sprite):
         self.pos = pygame.math.Vector2(x, y)
         self.vel = pygame.math.Vector2(random.choice([-2, 2]), random.choice([-2, 2]))
         self.angulo = 0
-        self.raio_colisao = 30
 
         self.timer_ataque = 0
         self.estado = "MOVENDO"
@@ -192,25 +186,36 @@ class Pokemon(pygame.sprite.Sprite):
         self.defendendo = False
         self.timers_imunidade = {}
 
-        # Flash de dano e distorção
         self.dano_flash_timer = 0
         self.dano_flash_duracao = 8
-        self.wobble_phase = 0.0
-        self.wobble_intensidade = 0.08
+
+        self.breathe_phase = 0.0
+        self.breathe_intensidade = 0.09
 
         try:
-            self.image_original = pygame.image.load(imagem_path)
-            self.image_original = pygame.transform.scale(self.image_original, (60, 60))
+            self.image_original = pygame.image.load(imagem_path).convert_alpha()
+            self.image_original = pygame.transform.scale(self.image_original, (120, 120))
         except:
-            self.image_original = pygame.Surface((60, 60))
-            self.image_original.fill(cor)
-            pygame.draw.circle(self.image_original, PRETO, (30, 30), 28, 3)
+            self.image_original = pygame.Surface((120, 120), pygame.SRCALPHA)
+            self.image_original.fill((0, 0, 0, 0))
+            pygame.draw.circle(self.image_original, cor, (60, 60), 58)
 
         self.image = self.image_original
         self.rect = self.image.get_rect(center=(x, y))
+        self.raio_colisao = max(self.image.get_width(), self.image.get_height()) // 2  # hitbox baseada no sprite
+
+        # pré-calcula sprite vermelha usando máscara (só pixels não transparentes)
+        mask = pygame.mask.from_surface(self.image_original)  # pega pixels não transparentes[web:67]
+
+        # cria surface só com a silhueta do personagem, toda vermelha e fundo transparente
+        self.image_hit = mask.to_surface(
+        setsurface=None,
+        unsetsurface=None,
+        setcolor=(255, 0, 0, 255),   # onde tem sprite fica vermelho
+        unsetcolor=(0, 0, 0, 0)      # onde é transparente continua totalmente transparente
+        )  # [web:163]
 
     def update(self, grupo_projeteis, particles):
-        # timers de imunidade (ex: fogo contínuo)
         remover = []
         for tipo, tempo in self.timers_imunidade.items():
             if tempo > 0:
@@ -226,7 +231,7 @@ class Pokemon(pygame.sprite.Sprite):
 
         tipo_atk = self.info["tipo"]
 
-        # ----------------- LÓGICA DE ATAQUE -----------------
+        # ---------- lógica de ataque (igual antes) ----------
         if tipo_atk == "CARGA_FISICA":
             if self.estado == "MOVENDO":
                 if self.inimigo_ref and self.pos.distance_to(self.inimigo_ref.pos) < 180:
@@ -327,7 +332,7 @@ class Pokemon(pygame.sprite.Sprite):
                     self.defendendo = False
                     self.estado = "MOVENDO"
 
-        # ----------------- MOVIMENTO E PAREDES -----------------
+        # ---------- movimento / paredes ----------
         self.pos += self.vel
 
         bateu = False
@@ -356,28 +361,27 @@ class Pokemon(pygame.sprite.Sprite):
             if v_len > 12:
                 self.vel.scale_to_length(12)
 
-        # ----------------- ANIMAÇÃO (ROTAÇÃO + WOBBLE + FLASH) -----------------
-        rot_speed = 5 + (self.vel.length())
-        self.angulo += (rot_speed * 0.5)
+        # ---------- animação (respiração + flash) ----------
+        self.breathe_phase += 0.12
+        fator = (math.sin(self.breathe_phase) + 1) / 2  # varia de 0 a 1
+        escala_y = 1.0 + fator * self.breathe_intensidade 
+        escala_x = 1.0 
 
         base_img = self.image_original
+        larg = max(1, int(base_img.get_width() * escala_x))
+        alt  = max(1, int(base_img.get_height() * escala_y))
+        img_breathe = pygame.transform.smoothscale(base_img, (larg, alt))
+        img_hit_breathe = pygame.transform.smoothscale(self.image_hit, (larg, alt))  # mesma respiração no hit
 
-        # wobble: distorção tipo onda
-        self.wobble_phase += 0.25 + (self.vel.length() * 0.02)
-        escala = 1.0 + math.sin(self.wobble_phase) * self.wobble_intensidade
-        larg = max(1, int(base_img.get_width() * escala))
-        alt = max(1, int(base_img.get_height() * (2.0 - escala)))
-        img_wobble = pygame.transform.smoothscale(base_img, (larg, alt))
-
-        img_rot = pygame.transform.rotate(img_wobble, self.angulo)
+        rot_speed = 5 + (self.vel.length())
+        self.angulo += (rot_speed * 0.5)
+        img_rot = pygame.transform.rotate(img_breathe, self.angulo)
+        img_hit_rot = pygame.transform.rotate(img_hit_breathe, self.angulo)
 
         if self.dano_flash_timer > 0:
             self.dano_flash_timer -= 1
-            img_flash = img_rot.copy().convert_alpha()
-            red_surf = pygame.Surface(img_flash.get_size(), pygame.SRCALPHA)
-            red_surf.fill((255, 0, 0, 120))
-            img_flash.blit(red_surf, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
-            final_image = img_flash
+            final_image = img_rot.copy()
+            final_image.blit(img_hit_rot, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)  # vermelho só onde há sprite[web:123]
         else:
             final_image = img_rot
 
@@ -416,7 +420,7 @@ class Pokemon(pygame.sprite.Sprite):
                                (int(self.pos.x), int(self.pos.y)), 45, 1)
 
 # =============================================================================
-# MENU COM MOUSE
+# MENU
 # =============================================================================
 class BotaoAtaque:
     def __init__(self, x, y, w, h, info):
@@ -514,7 +518,7 @@ def tela_menu_mouse(tela):
     return p1_choice, p2_choice
 
 # =============================================================================
-# LOOP DE BATALHA
+# BATALHA (vitória com ESPAÇO)
 # =============================================================================
 def rodar_batalha(tela, id1, id2):
     info1 = ATAQUES_INFO[id1]
@@ -532,29 +536,34 @@ def rodar_batalha(tela, id1, id2):
     clock = pygame.time.Clock()
     hitstop_timer = 0
     vencedor = None
-    tempo_vitoria = 0
 
     while True:
         clock.tick(FPS)
-        agora = pygame.time.get_ticks()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "SAIR"
 
         if vencedor:
+            font_big = pygame.font.Font(None, 80)
+            font_small = pygame.font.Font(None, 40)
             tela.fill(COR_FUNDO)
-            txt_win = pygame.font.Font(None, 80).render(f"{vencedor} VENCEU!", True, BRANCO)
+            txt_win = font_big.render(f"{vencedor} VENCEU!", True, BRANCO)
+            txt_info = font_small.render("Pressione ESPAÇO para voltar ao menu", True, CINZA)
             tela.blit(txt_win, (LARGURA_TELA // 2 - txt_win.get_width() // 2,
-                                ALTURA_TELA // 2 - 50))
-            segundos = 10 - ((agora - tempo_vitoria) // 1000)
-            txt_time = pygame.font.Font(None, 40).render(
-                f"Menu em {segundos}...", True, CINZA)
-            tela.blit(txt_time, (LARGURA_TELA // 2 - txt_time.get_width() // 2,
-                                 ALTURA_TELA // 2 + 50))
+                                ALTURA_TELA // 2 - 60))
+            tela.blit(txt_info, (LARGURA_TELA // 2 - txt_info.get_width() // 2,
+                                 ALTURA_TELA // 2 + 10))
             pygame.display.flip()
-            if agora - tempo_vitoria > 10000:
-                return "MENU"
+
+            esperando = True
+            while esperando:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        return "SAIR"
+                    if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                        return "MENU"
+                pygame.time.Clock().tick(30)
             continue
 
         if hitstop_timer > 0:
@@ -567,8 +576,12 @@ def rodar_batalha(tela, id1, id2):
                 if p.vida <= 0:
                     particles.remove(p)
 
-            # -------- COLISÃO FÍSICA ENTRE POKÉMONS (sem dano base) --------
-            if pygame.sprite.collide_rect(poke1, poke2):
+            # colisão física
+            # colisão física com raio ajustável
+            RAIO_COLISAO_POKES = 60  # experimente valores menores, ex: 60, 50
+
+            dist = poke1.pos.distance_to(poke2.pos)
+            if dist < RAIO_COLISAO_POKES:
                 poke1.vel, poke2.vel = poke2.vel, poke1.vel
                 dx, dy = poke1.pos.x - poke2.pos.x, poke1.pos.y - poke2.pos.y
                 dist = math.hypot(dx, dy) or 1
@@ -607,7 +620,7 @@ def rodar_batalha(tela, id1, id2):
                         particles.append(Particula(poke1.pos.x, poke1.pos.y,
                                                    BRANCO, 4, 5, 20))
 
-            # -------- COLISÃO COM PROJÉTEIS --------
+            # colisão com projéteis
             for p in grupo_pokes:
                 hits = pygame.sprite.spritecollide(p, grupo_projeteis, False)
                 for tiro in hits:
@@ -638,12 +651,9 @@ def rodar_batalha(tela, id1, id2):
 
             if poke1.vida <= 0:
                 vencedor = "JOGADOR 2"
-                tempo_vitoria = agora
             elif poke2.vida <= 0:
                 vencedor = "JOGADOR 1"
-                tempo_vitoria = agora
 
-        # -------- DESENHO --------
         tela.fill(COR_FUNDO)
         pygame.draw.rect(tela, COR_ARENA_BORDA, ARENA_RECT, 4)
 
