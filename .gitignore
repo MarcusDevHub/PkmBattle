@@ -22,6 +22,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+entities/__pycache__
 
 # --- Ambientes Virtuais (Venv) ---
 # Adicione aqui o nome da sua pasta de ambiente virtual se for diferente
@@ -42,7 +43,8 @@ pokemon_data.json
 # OPCIONAL: Ignorar a pasta assets se as imagens forem baixadas pelo script.
 # Se você quiser versionar as imagens (para quem baixar o repo já jogar),
 # remova a linha abaixo. Se quiser economizar espaço no Git, mantenha.
-# assets/
+assets/
+.png
 
 # --- Sistema Operacional ---
 .DS_Store
