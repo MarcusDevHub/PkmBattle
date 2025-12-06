@@ -6,23 +6,17 @@ from entities.pokemon import Pokemon
 from ui.components import HealthBar
 
 class BattleScene:
-    def __init__(self, game, p1_id, p2_id):
+    def __init__(self, game, p1_data, p2_data):
         self.game = game
-        
-        # Cria Pokémons (nomes de arquivo devem estar na pasta assets)
-        self.p1 = Pokemon("Player 1", 200, 300, p1_id, "pokemon1.png")
-        self.p2 = Pokemon("Player 2", 600, 300, p2_id, "pokemon2.png")
-        
-        # Referência cruzada para IA
+        self.p1 = Pokemon("Player 1", 200, 300, p1_data[0], p1_data[1])
+        self.p2 = Pokemon("Player 2", 600, 300, p2_data[0], p2_data[1])
         self.p1.enemy_ref = self.p2
         self.p2.enemy_ref = self.p1
         
-        # Grupos de Sprites
         self.sprites = pygame.sprite.Group(self.p1, self.p2)
         self.projectiles = pygame.sprite.Group()
-        self.particles = [] # Lista simples para partículas (mais rápido que Group)
+        self.particles = []
         
-        # UI
         self.ui_p1 = HealthBar(50, 50)
         self.ui_p2 = HealthBar(SCREEN_WIDTH - 250, 50)
         
@@ -30,100 +24,72 @@ class BattleScene:
         self.winner = None
 
     def handle_event(self, event):
-        # Se tiver vencedor, ESPAÇO volta pro menu
+        # Se pressionar ESC a qualquer momento, volta pro menu
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            print("[GAME] Batalha cancelada pelo usuário.")
+            self.game.change_scene("CHAR_SELECT")
+            return
+        # Se houver um vencedor, pressionar ESPAÇO reinicia o jogo
         if self.winner and event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-            self.game.change_scene("MENU")
+            self.game.change_scene("CHAR_SELECT")
 
     def update(self):
-        # Pausa lógica se houver vencedor
-        if self.winner: 
-            return 
-            
-        # Hitstop (congelamento breve ao acertar)
+        if self.winner: return
         if self.hitstop > 0:
             self.hitstop -= 1
             return
 
-        # Atualiza tudo
-        # Passa dt=1 e as referências de grupos
         self.sprites.update(1, self.projectiles, self.particles)
         self.projectiles.update(self.particles)
-        
-        # Atualiza partículas
         for p in self.particles[:]:
             p.update()
-            if p.life <= 0:
-                self.particles.remove(p)
+            if p.life <= 0: self.particles.remove(p)
             
-        self._check_collisions()
-        self._check_win()
+        self._collisions()
+        if self.p1.hp <= 0: self.winner = "PLAYER 2"
+        elif self.p2.hp <= 0: self.winner = "PLAYER 1"
 
-    def _check_collisions(self):
-        # Colisão Física (Empurrão)
-        if pygame.sprite.collide_rect(self.p1, self.p2):
-            dx = self.p1.pos.x - self.p2.pos.x
-            dy = self.p1.pos.y - self.p2.pos.y
-            dist = math.hypot(dx, dy) or 1
-            
-            push = 8
-            self.p1.pos += pygame.math.Vector2(dx/dist*push, dy/dist*push)
+    def _collisions(self):
+        # Física (Distância reduzida para 50)
+        dx = self.p1.pos.x - self.p2.pos.x
+        dy = self.p1.pos.y - self.p2.pos.y
+        dist = math.hypot(dx, dy) or 1
+        if dist < 50:
+            push = (50 - dist) * 0.5
+            self.p1.pos += pygame.math.Vector2((dx/dist)*push, (dy/dist)*push)
             self.p1.vel, self.p2.vel = self.p2.vel, self.p1.vel
 
-        # Colisão Projéteis -> Pokémons
+        # Dano
         hits = pygame.sprite.groupcollide(self.sprites, self.projectiles, False, False)
         for poke, projs in hits.items():
             for p in projs:
-                # Ignora se for o próprio dono ou se projétil já está morrendo
                 if p.owner != poke and not p.dying:
-                    hit_time = poke.take_damage(p.damage)
-                    self.hitstop = hit_time
+                    hs = poke.take_damage(p.damage)
+                    self.hitstop = hs
                     p.kill_sequence()
-
-    def _check_win(self):
-        if self.p1.hp <= 0: self.winner = "PLAYER 2"
-        elif self.p2.hp <= 0: self.winner = "PLAYER 1"
 
     def draw(self, screen):
         screen.fill(COLORS["BG"])
         pygame.draw.rect(screen, COLORS["BORDER"], ARENA_RECT, 4)
         
-        # 1. Desenha perigos de chão (Fogo)
         for p in self.projectiles:
-            if getattr(p, 'is_floor_hazard', False): 
-                screen.blit(p.image, p.rect)
+            if p.is_floor_hazard: screen.blit(p.image, p.rect)
             
-        # 2. Desenha Pokémons
+        self.p1.draw_effects(screen)
+        self.p2.draw_effects(screen)
+        
         self.sprites.draw(screen)
         
-        # 3. Desenha Projéteis (Voadores)
         for p in self.projectiles:
-            if not getattr(p, 'is_floor_hazard', False): 
-                screen.blit(p.image, p.rect)
+            if not p.is_floor_hazard: screen.blit(p.image, p.rect)
+        for p in self.particles: p.draw(screen)
             
-        # 4. Desenha Partículas
-        for part in self.particles:
-            part.draw(screen)
-            
-        # 5. UI
         self.ui_p1.draw(screen, self.p1)
         self.ui_p2.draw(screen, self.p2)
         
-        # Tela de Vitória
         if self.winner:
-            self._draw_win(screen)
-
-    def _draw_win(self, screen):
-        # Overlay escuro
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
-        screen.blit(overlay, (0,0))
-        
-        # Texto Vencedor
-        fb = AssetManager.get_font(80)
-        txt = fb.render(f"{self.winner} VENCEU!", True, COLORS["WHITE"])
-        screen.blit(txt, (SCREEN_WIDTH//2 - txt.get_width()//2, SCREEN_HEIGHT//2 - 50))
-        
-        # Instrução
-        fs = AssetManager.get_font(40)
-        inf = fs.render("Pressione ESPAÇO para Menu", True, COLORS["GREY"])
-        screen.blit(inf, (SCREEN_WIDTH//2 - inf.get_width()//2, SCREEN_HEIGHT//2 + 50))
+            over = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            over.fill((0,0,0,180))
+            screen.blit(over, (0,0))
+            font = AssetManager.get_font(80)
+            screen.blit(font.render(f"{self.winner} VENCEU!", True, COLORS["WHITE"]), (150, 250))
